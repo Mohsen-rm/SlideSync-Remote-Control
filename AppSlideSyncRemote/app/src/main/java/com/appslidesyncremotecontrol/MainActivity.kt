@@ -37,11 +37,13 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.Response
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-class MainActivity : ComponentActivity() {
-    // المتغير لتخزين عنوان السيرفر المكتشف
+class MainActivity : ComponentActivity(){
+
     var remoteControlUrl: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,7 +60,7 @@ class MainActivity : ComponentActivity() {
         return when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> {
                 sendCommand("next_slide")
-                true  // منع تغيير مستوى الصوت الافتراضي
+                true
             }
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
                 sendCommand("prev_slide")
@@ -94,19 +96,17 @@ fun RemoteControlContent(modifier: Modifier = Modifier, onServerFound: (String?)
     var discoveryFailed by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
-    // دالة لإعادة المحاولة
     fun runDiscovery() {
         discoveryFailed = false
         discoveryMessage = "جارٍ الكشف عن السيرفر..."
         coroutineScope.launch {
-            ipAddress = getIPAddress(context)
+            ipAddress = getIPAddress()
             val foundUrl = findRemoteControlServer(context, ipAddress)
             ServerConfig.remoteControlUrl = foundUrl
             serverUrl = foundUrl
             onServerFound(foundUrl)
             if (foundUrl != null) {
                 discoveryMessage = "تم اكتشاف السيرفر: $foundUrl"
-                // بعد 3 ثوانٍ تختفي الرسالة
                 delay(3000)
                 discoveryMessage = ""
             } else {
@@ -116,7 +116,6 @@ fun RemoteControlContent(modifier: Modifier = Modifier, onServerFound: (String?)
         }
     }
 
-    // بدء عملية الكشف عند تحميل الـ Composable
     LaunchedEffect(Unit) {
         runDiscovery()
     }
@@ -126,7 +125,7 @@ fun RemoteControlContent(modifier: Modifier = Modifier, onServerFound: (String?)
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // القسم العلوي لعرض المعلومات
+
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -145,10 +144,8 @@ fun RemoteControlContent(modifier: Modifier = Modifier, onServerFound: (String?)
             }
         }
 
-        // Spacer لدفع الأزرار إلى منتصف الشاشة
         Spacer(modifier = Modifier.weight(1f))
 
-        // صف الأزرار في منتصف الشاشة
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -173,30 +170,32 @@ fun RemoteControlContent(modifier: Modifier = Modifier, onServerFound: (String?)
             }
         }
 
-        // Spacer إضافي إذا رغبت في وجود مسافة في الأسفل
         Spacer(modifier = Modifier.weight(1f))
     }
 }
 
-fun getIPAddress(context: Context): String {
-    val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-    val wifiInfo = wifiManager.connectionInfo
-    val ip = wifiInfo.ipAddress
-    return String.format(
-        Locale.US, "%d.%d.%d.%d",
-        ip and 0xff,
-        ip shr 8 and 0xff,
-        ip shr 16 and 0xff,
-        ip shr 24 and 0xff
-    )
+fun getIPAddress(): String {
+    try {
+        val interfaces = NetworkInterface.getNetworkInterfaces()
+        for (intf in interfaces) {
+            val addrs = intf.inetAddresses
+            for (addr in addrs) {
+                if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                    return addr.hostAddress ?: ""
+                }
+            }
+        }
+    } catch (ex: Exception) {
+        Log.e("RemoteControl", "Error getting IP address", ex)
+    }
+    return "0.0.0.0"
 }
 
-// دالة بحث عن السيرفر عبر الشبكة مع طباعات للتتبع
 suspend fun findRemoteControlServer(context: Context, deviceIp: String): String? {
     val parts = deviceIp.split(".")
     if (parts.size != 4) return null
-    val prefix = parts.take(3).joinToString(".")  // مثل "192.168.0"
-    // إنشاء عميل مع timeouts قصيرة
+    val prefix = parts.take(3).joinToString(".")
+
     val client = OkHttpClient.Builder()
         .connectTimeout(500, TimeUnit.MILLISECONDS)
         .readTimeout(500, TimeUnit.MILLISECONDS)
@@ -216,7 +215,7 @@ suspend fun findRemoteControlServer(context: Context, deviceIp: String): String?
                         if (body.contains("\"AppSlideSyncRemote\": true") &&
                             body.contains("\"port\": 57875")
                         ) {
-                            url  // السيرفر المطلوب
+                            url
                         } else {
                             null
                         }
@@ -238,7 +237,7 @@ object ServerConfig {
 }
 
 fun sendCommand(command: String) {
-    // استخدام عنوان السيرفر المكتشف إذا كان موجودًا، وإلا استخدام عنوان افتراضي
+
     val baseUrl = ServerConfig.remoteControlUrl ?: "http://192.168.0.115:5000"
     val url = "$baseUrl/$command"
     val client = OkHttpClient()
